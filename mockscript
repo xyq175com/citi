@@ -1,0 +1,44 @@
+let
+    // Step 1: Retrieve List of Repositories
+    Source = Json.Document(Web.Contents("https://api.github.com/orgs/{organization}/repos", [Headers=[#"Authorization"="Bearer YourAccessToken"]])),
+    Repositories = Source[Name],
+
+    // Step 2: Iterate Through Repositories
+    AppendTables = List.Accumulate(
+        Repositories,
+        Table.FromRecords({}),
+        (state, repo) =>
+            let
+                // Step 3: Dynamically Query Pull Requests for Each Repository
+                GetPullRequests = (page) =>
+                    let
+                        apiUrl = "https://api.github.com/repos/{organization}/" & repo & "/pulls?per_page=100&page=" & Number.ToText(page),
+                        PullRequests = Json.Document(Web.Contents(apiUrl, [Headers=[#"Authorization"="Bearer YourAccessToken"]])),
+                        PullRequestsTable = Record.ToTable(PullRequests)
+                    in
+                        PullRequestsTable,
+
+                // Step 4: Fetch All Pages of Pull Requests
+                GetAllPages = (page) =>
+                    let
+                        currentTable = GetPullRequests(page),
+                        nextTable = if Table.RowCount(currentTable) = 100 then GetAllPages(page + 1) else Table.FromRecords({})
+                    in
+                        Table.Combine({currentTable, nextTable}),
+
+                // Step 5: Check if the Repository has Pull Requests
+                AllPages = GetAllPages(1),
+                ShouldAppend = Table.RowCount(AllPages) > 0,
+
+                // Step 6: Append Results (if there are pull requests)
+                AppendedTable = if ShouldAppend then Table.Combine({state, AllPages}) else state
+            in
+                AppendedTable
+    ),
+
+    // Optional: Expand and Transform Data as Needed
+    ExpandedTable = Table.ExpandRecordColumn(AppendTables, "Value", {"Column1", "Column2", ...}),
+    // Add additional transformations as needed
+
+in
+    ExpandedTable
